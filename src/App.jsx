@@ -11,12 +11,46 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [driverLocation, setDriverLocation] = useState(null);
 
-  const [stats, setStats] = useState({
-    meals: 0,
-    kg: 0,
-    co2: 0,
-    deliveries: 0,
+  const [activeTab, setActiveTab] = useState("Dashboard");
+
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] =
+    useState(false);
+
+  const [settings, setSettings] = useState({
+    donationAlerts: true,
+    driverUpdates: true,
+    deliveryUpdates: true,
+    defaultCity: "Jaipur",
+    safetyBuffer: "2 hours",
   });
+
+  const [stats, setStats] = useState({
+    meals: 248,
+    kg: 124,
+    co2: 101.7,
+    deliveries: 18,
+  });
+
+  /* =========================================================
+     NOTIFICATIONS
+  ========================================================= */
+
+  const addNotification = (title, message) => {
+    setNotifications((prev) => [
+      {
+        id: Date.now(),
+        title,
+        message,
+        time: "Just now",
+      },
+      ...prev,
+    ]);
+  };
+
+  /* =========================================================
+     CREATE DONATION
+  ========================================================= */
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,7 +58,6 @@ function App() {
     setLoading(true);
 
     try {
-      // STEP 1: Create donation
       const response = await fetch(
         "http://127.0.0.1:5000/api/donations",
         {
@@ -44,10 +77,11 @@ function App() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message);
+        throw new Error(
+          data.message || "Donation failed"
+        );
       }
 
-      // STEP 2: Match NGO
       const matchResponse = await fetch(
         `http://127.0.0.1:5000/api/match/${data.donation.id}`,
         {
@@ -55,16 +89,18 @@ function App() {
         }
       );
 
-      const matchData = await matchResponse.json();
+      const matchData =
+        await matchResponse.json();
 
       if (!matchResponse.ok) {
-        throw new Error(matchData.message);
+        throw new Error(
+          matchData.message ||
+            "NGO matching failed"
+        );
       }
 
-      // Save donation
       setDonation(matchData.donation);
 
-      // Update impact statistics ONCE
       const donatedKg = Number(
         matchData.donation.quantity
       );
@@ -74,11 +110,8 @@ function App() {
         meals:
           prev.meals +
           Math.round(donatedKg * 2),
-
         kg:
-          prev.kg +
-          donatedKg,
-
+          prev.kg + donatedKg,
         co2: Number(
           (
             prev.co2 +
@@ -87,26 +120,38 @@ function App() {
         ),
       }));
 
-      // Clear form
+      if (settings.donationAlerts) {
+        addNotification(
+          "Donation Matched",
+          `Your ${matchData.donation.foodType} donation has been matched with ${matchData.donation.matchedNGO.name}.`
+        );
+      }
+
       setFoodType("");
       setQuantity("");
       setLocation("");
       setExpiryTime("");
 
+      setActiveTab("Donations");
     } catch (error) {
       console.error(error);
 
       alert(
         error.message ||
-        "Something went wrong"
+          "Something went wrong"
       );
     }
 
     setLoading(false);
   };
 
-  // ASSIGN DRIVER
+  /* =========================================================
+     ASSIGN DRIVER
+  ========================================================= */
+
   const assignDriver = async () => {
+    if (!donation) return;
+
     try {
       const response = await fetch(
         `http://127.0.0.1:5000/api/assign-driver/${donation.id}`,
@@ -115,17 +160,26 @@ function App() {
         }
       );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message);
+        throw new Error(
+          data.message ||
+            "Could not assign driver"
+        );
       }
 
       setDonation(data.donation);
 
       setDriverLocation({
         currentArea:
-          data.donation.driver.currentArea,
+          data.donation.driver
+            .currentArea,
+
+        headingTo:
+          data.donation.driver
+            .headingTo,
 
         eta:
           data.donation.driver.eta,
@@ -134,17 +188,32 @@ function App() {
           data.donation.driver.distance,
       });
 
+      if (settings.driverUpdates) {
+        addNotification(
+          "Driver Assigned",
+          `${data.donation.driver.name} is waiting at the pickup location.`
+        );
+      }
+
+      setActiveTab("Tracking");
     } catch (error) {
       alert(error.message);
     }
   };
 
-  // LIVE AREA TRACKING
+  /* =========================================================
+     LIVE DRIVER LOCATION
+
+     IMPORTANT:
+     Driver starts moving ONLY after
+     food has been picked up.
+  ========================================================= */
+
   useEffect(() => {
     if (
       !donation ||
       !donation.driver ||
-      donation.status !== "DRIVER ASSIGNED"
+      donation.status !== "PICKED UP"
     ) {
       return;
     }
@@ -152,37 +221,47 @@ function App() {
     const interval = setInterval(
       async () => {
         try {
-          const response = await fetch(
-            `http://127.0.0.1:5000/api/driver-location/${donation.id}`,
-            {
-              method: "PUT",
-            }
-          );
+          const response =
+            await fetch(
+              `http://127.0.0.1:5000/api/driver-location/${donation.id}`,
+              {
+                method: "PUT",
+              }
+            );
 
           const data =
             await response.json();
 
           if (data.donation) {
-            setDonation(data.donation);
+            setDonation(
+              data.donation
+            );
 
-            setDriverLocation({
-              currentArea:
-                data.donation.driver
-                  .currentArea,
+            if (
+              data.donation.driver
+            ) {
+              setDriverLocation({
+                currentArea:
+                  data.donation.driver
+                    .currentArea,
 
-              eta:
-                data.donation.driver
-                  .eta,
+                headingTo:
+                  data.donation.driver
+                    .headingTo,
 
-              distance:
-                data.donation.driver
-                  .distance,
-            });
+                eta:
+                  data.donation.driver
+                    .eta,
+
+                distance:
+                  data.donation.driver
+                    .distance,
+              });
+            }
           }
-
         } catch (error) {
           console.error(
-            "Location update error:",
+            "Tracking error:",
             error
           );
         }
@@ -192,27 +271,29 @@ function App() {
 
     return () =>
       clearInterval(interval);
-
   }, [
     donation?.id,
     donation?.status,
   ]);
 
-  // UPDATE DELIVERY STATUS
+  /* =========================================================
+     UPDATE STATUS
+  ========================================================= */
+
   const updateStatus = async (
     status
   ) => {
+    if (!donation) return;
+
     try {
       const response = await fetch(
         `http://127.0.0.1:5000/api/donation-status/${donation.id}`,
         {
           method: "PUT",
-
           headers: {
             "Content-Type":
               "application/json",
           },
-
           body: JSON.stringify({
             status,
           }),
@@ -224,13 +305,50 @@ function App() {
 
       if (!response.ok) {
         throw new Error(
-          data.message
+          data.message ||
+            "Status update failed"
         );
       }
 
-      setDonation(data.donation);
+      setDonation(
+        data.donation
+      );
 
-      // Count completed delivery
+      if (data.donation.driver) {
+        setDriverLocation({
+          currentArea:
+            data.donation.driver
+              .currentArea,
+
+          headingTo:
+            data.donation.driver
+              .headingTo,
+
+          eta:
+            data.donation.driver
+              .eta,
+
+          distance:
+            data.donation.driver
+              .distance,
+        });
+      }
+
+      if (
+        status === "PICKED UP"
+      ) {
+        if (
+          settings.deliveryUpdates
+        ) {
+          addNotification(
+            "Food Picked Up",
+            "The driver has picked up the donated food and started the delivery route."
+          );
+        }
+
+        setActiveTab("Tracking");
+      }
+
       if (
         status === "DELIVERED"
       ) {
@@ -239,457 +357,1100 @@ function App() {
           deliveries:
             prev.deliveries + 1,
         }));
-      }
 
+        if (
+          settings.deliveryUpdates
+        ) {
+          addNotification(
+            "Food Delivered",
+            "The donated food has successfully reached the NGO."
+          );
+        }
+      }
     } catch (error) {
       alert(error.message);
     }
   };
 
-  // STATUS HELPERS
+  /* =========================================================
+     STATUS
+  ========================================================= */
+
+  const statusOrder = [
+    "POSTED",
+    "MATCHED",
+    "DRIVER ASSIGNED",
+    "PICKED UP",
+    "DELIVERED",
+  ];
+
   const isStatusActive = (
     status
   ) => {
-    const order = [
-      "POSTED",
-      "MATCHED",
-      "DRIVER ASSIGNED",
-      "PICKED UP",
-      "DELIVERED",
-    ];
-
-    const currentIndex =
-      order.indexOf(
-        donation?.status
-      );
-
-    const statusIndex =
-      order.indexOf(status);
+    if (!donation) return false;
 
     return (
-      currentIndex >=
-      statusIndex
+      statusOrder.indexOf(
+        donation.status
+      ) >=
+      statusOrder.indexOf(status)
+    );
+  };
+
+  /* =========================================================
+     DRIVER ICON
+  ========================================================= */
+
+  const getDriverIcon = () => {
+    if (
+      donation?.driver?.gender ===
+      "female"
+    ) {
+      return "👩";
+    }
+
+    return "👨";
+  };
+
+  /* =========================================================
+     DRIVER PROGRESS
+  ========================================================= */
+
+  const getDriverProgress = () => {
+    if (!donation) return 0;
+
+    if (
+      donation.status ===
+      "DRIVER ASSIGNED"
+    ) {
+      return 0;
+    }
+
+    if (
+      donation.status ===
+      "DELIVERED"
+    ) {
+      return 100;
+    }
+
+    const distance =
+      Number(
+        driverLocation?.distance ??
+          donation?.driver?.distance ??
+          4.2
+      );
+
+    const progress =
+      100 -
+      (distance / 4.2) * 100;
+
+    return Math.min(
+      100,
+      Math.max(8, progress)
     );
   };
 
   return (
     <div className="app">
 
-      {/* HEADER */}
+      {/* =====================================================
+          SIDEBAR
+      ===================================================== */}
 
-      <div className="header">
+      <aside className="sidebar">
 
-        <h1>
-          🍱 Surplus-to-Shelter
-        </h1>
+        <div className="brand">
 
-        <p>
-          Real-Time Food Rescue
-          & Distribution Platform
-        </p>
-
-      </div>
-
-      {/* IMPACT DASHBOARD */}
-
-      <div className="dashboard">
-
-        <div className="stat-card">
-
-          <h3>
-            🍽️ Meals Rescued
-          </h3>
-
-          <div className="number">
-            {stats.meals}
+          <div className="brand-icon">
+            🤝
           </div>
 
-        </div>
-
-        <div className="stat-card">
-
-          <h3>
-            ⚖️ Food Diverted
-          </h3>
-
-          <div className="number">
-            {stats.kg.toFixed(1)} kg
-          </div>
-
-        </div>
-
-        <div className="stat-card">
-
-          <h3>
-            🌱 CO₂e Avoided
-          </h3>
-
-          <div className="number">
-            {stats.co2.toFixed(1)} kg
-          </div>
-
-        </div>
-
-        <div className="stat-card">
-
-          <h3>
-            🚚 Deliveries Completed
-          </h3>
-
-          <div className="number">
-            {stats.deliveries}
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* DONATION FORM */}
-
-      <div className="form-card">
-
-        <h2>
-          🍱 Donate Surplus Food
-        </h2>
-
-        <form
-          onSubmit={handleSubmit}
-        >
-
-          <div className="form-group">
-
-            <label>
-              Food Type
-            </label>
-
-            <input
-              type="text"
-              value={foodType}
-              onChange={(e) =>
-                setFoodType(
-                  e.target.value
-                )
-              }
-              placeholder="e.g. Rice, Dal, Roti"
-              required
-            />
-
-          </div>
-
-          <div className="form-group">
-
-            <label>
-              Quantity (kg)
-            </label>
-
-            <input
-              type="number"
-              min="1"
-              value={quantity}
-              onChange={(e) =>
-                setQuantity(
-                  e.target.value
-                )
-              }
-              placeholder="e.g. 20"
-              required
-            />
-
-          </div>
-
-          <div className="form-group">
-
-            <label>
-              Pickup Location
-            </label>
-
-            <input
-              type="text"
-              value={location}
-              onChange={(e) =>
-                setLocation(
-                  e.target.value
-                )
-              }
-              placeholder="e.g. C-Scheme, Jaipur"
-              required
-            />
-
-          </div>
-
-          <div className="form-group">
-
-            <label>
-              Safe Until
-            </label>
-
-            <input
-              type="time"
-              value={expiryTime}
-              onChange={(e) =>
-                setExpiryTime(
-                  e.target.value
-                )
-              }
-              required
-            />
-
-          </div>
-
-          <button
-            className="submit-btn"
-            type="submit"
-            disabled={loading}
-          >
-            {loading
-              ? "MATCHING..."
-              : "POST DONATION"}
-          </button>
-
-        </form>
-
-        {/* DONATION RESULT */}
-
-        {donation && (
-
-          <div className="match-result">
-
+          <div>
             <h2>
-              🤝 Donation Matched!
+              Surplus-to-Shelter
             </h2>
 
-            <p>
+            <span>
+              Food Donation Network
+            </span>
+          </div>
+
+        </div>
+
+        <nav>
+
+          <button
+            className={
+              activeTab ===
+              "Dashboard"
+                ? "nav-item active"
+                : "nav-item"
+            }
+            onClick={() =>
+              setActiveTab(
+                "Dashboard"
+              )
+            }
+          >
+            🏠
+            <span>
+              Dashboard
+            </span>
+          </button>
+
+          <button
+            className={
+              activeTab ===
+              "Donations"
+                ? "nav-item active"
+                : "nav-item"
+            }
+            onClick={() =>
+              setActiveTab(
+                "Donations"
+              )
+            }
+          >
+            📦
+            <span>
+              Food Donations
+            </span>
+          </button>
+
+          <button
+            className={
+              activeTab ===
+              "Tracking"
+                ? "nav-item active"
+                : "nav-item"
+            }
+            onClick={() =>
+              setActiveTab(
+                "Tracking"
+              )
+            }
+          >
+            🚗
+            <span>
+              Driver Tracking
+            </span>
+          </button>
+
+          <button
+            className={
+              activeTab ===
+              "Impact"
+                ? "nav-item active"
+                : "nav-item"
+            }
+            onClick={() =>
+              setActiveTab(
+                "Impact"
+              )
+            }
+          >
+            🌱
+            <span>
+              Community Impact
+            </span>
+          </button>
+
+        </nav>
+
+        <div className="sidebar-bottom">
+
+          <button
+            className="settings-btn"
+            onClick={() =>
+              setActiveTab(
+                "Settings"
+              )
+            }
+          >
+            ⚙️
+            <span>
+              Settings
+            </span>
+          </button>
+
+          <div className="team-card">
+
+            <div className="team-avatar">
+              B
+            </div>
+
+            <div>
               <strong>
-                Food:
-              </strong>{" "}
-              {donation.foodType}
+                BrainByte
+              </strong>
+
+              <small>
+                AmiHacks 1.0
+              </small>
+            </div>
+
+          </div>
+
+        </div>
+
+      </aside>
+
+      {/* =====================================================
+          MAIN
+      ===================================================== */}
+
+      <main className="main">
+
+        {/* ===================================================
+            TOP BAR
+        =================================================== */}
+
+        <header className="topbar">
+
+          <div>
+
+            <h1>
+              {activeTab}
+            </h1>
+
+            <p>
+              Connecting surplus food
+              with people and communities
+              who need it.
             </p>
 
-            <p>
-              <strong>
-                Quantity:
-              </strong>{" "}
-              {donation.quantity} kg
-            </p>
+          </div>
 
-            <p>
-              <strong>
-                Pickup:
-              </strong>{" "}
-              {donation.location}
-            </p>
+          <div className="top-actions">
 
-            <p>
-              <strong>
-                Safe Until:
-              </strong>{" "}
-              {donation.expiryTime}
-            </p>
+            {/* NOTIFICATIONS */}
 
-            <p>
-              <strong>
-                Status:
-              </strong>{" "}
-              {donation.status}
-            </p>
+            <div className="notification-wrapper">
 
-            {/* STATUS TIMELINE */}
-
-            <div className="status-timeline">
-
-              <div
-                className={`status-step ${
-                  isStatusActive(
-                    "POSTED"
+              <button
+                className="notification"
+                onClick={() =>
+                  setShowNotifications(
+                    !showNotifications
                   )
-                    ? "active"
-                    : ""
-                }`}
+                }
               >
-                POSTED
+                🔔
+
+                {notifications.length >
+                  0 && (
+                  <span className="notification-count">
+                    {notifications.length}
+                  </span>
+                )}
+
+              </button>
+
+              {showNotifications && (
+
+                <div className="notification-dropdown">
+
+                  <div className="notification-header">
+
+                    <strong>
+                      Notifications
+                    </strong>
+
+                    <button
+                      onClick={() =>
+                        setNotifications([])
+                      }
+                    >
+                      Clear
+                    </button>
+
+                  </div>
+
+                  {notifications.length ===
+                  0 ? (
+
+                    <div className="no-notifications">
+
+                      🔔
+
+                      <p>
+                        NO NOTIFICATIONS
+                      </p>
+
+                    </div>
+
+                  ) : (
+
+                    notifications.map(
+                      (item) => (
+                        <div
+                          className="notification-item"
+                          key={item.id}
+                        >
+
+                          <strong>
+                            {item.title}
+                          </strong>
+
+                          <p>
+                            {item.message}
+                          </p>
+
+                          <small>
+                            {item.time}
+                          </small>
+
+                        </div>
+                      )
+                    )
+
+                  )}
+
+                </div>
+              )}
+
+            </div>
+
+            <div className="online">
+
+              <span />
+
+              Network Active
+
+            </div>
+
+          </div>
+
+        </header>
+
+        {/* ===================================================
+            DASHBOARD
+        =================================================== */}
+
+        {activeTab ===
+          "Dashboard" && (
+
+          <>
+
+            <section className="hero">
+
+              <div className="hero-content">
+
+                <span className="hero-tag">
+                  COMMUNITY FOOD DONATION
+                </span>
+
+                <h2>
+                  Give surplus food
+                  <br />
+                  a meaningful destination.
+                </h2>
+
+                <p>
+                  Connect surplus food
+                  from restaurants, caterers,
+                  campuses and stores with
+                  NGOs and community
+                  organisations.
+                </p>
+
+                <button
+                  className="hero-btn"
+                  onClick={() =>
+                    setActiveTab(
+                      "Donations"
+                    )
+                  }
+                >
+                  + Donate Food
+                </button>
+
               </div>
 
-              <div
-                className={`status-step ${
-                  isStatusActive(
-                    "MATCHED"
-                  )
-                    ? "active"
-                    : ""
-                }`}
-              >
-                MATCHED
+              <div className="hero-visual">
+
+                <div className="hero-circle">
+                  🤝
+                </div>
+
+                <div className="hero-small">
+                  🍱
+                </div>
+
+                <div className="hero-small two">
+                  🏠
+                </div>
+
               </div>
 
-              <div
-                className={`status-step ${
-                  isStatusActive(
-                    "DRIVER ASSIGNED"
-                  )
-                    ? "active"
-                    : ""
-                }`}
-              >
-                DRIVER
+            </section>
+
+            {/* STATS */}
+
+            <section className="stats-grid">
+
+              <div className="stat-card green">
+
+                <div className="stat-icon">
+                  🍽️
+                </div>
+
+                <div>
+
+                  <span>
+                    Meals Served
+                  </span>
+
+                  <strong>
+                    {stats.meals}
+                  </strong>
+
+                  <small>
+                    From donated food
+                  </small>
+
+                </div>
+
               </div>
 
-              <div
-                className={`status-step ${
-                  isStatusActive(
-                    "PICKED UP"
-                  )
-                    ? "active"
-                    : ""
-                }`}
-              >
-                PICKED UP
+              <div className="stat-card orange">
+
+                <div className="stat-icon">
+                  📦
+                </div>
+
+                <div>
+
+                  <span>
+                    Food Delivered
+                  </span>
+
+                  <strong>
+                    {stats.kg.toFixed(1)} kg
+                  </strong>
+
+                  <small>
+                    To community partners
+                  </small>
+
+                </div>
+
               </div>
 
-              <div
-                className={`status-step ${
-                  isStatusActive(
-                    "DELIVERED"
-                  )
-                    ? "active"
-                    : ""
-                }`}
-              >
-                DELIVERED
+              <div className="stat-card blue">
+
+                <div className="stat-icon">
+                  ♻️
+                </div>
+
+                <div>
+
+                  <span>
+                    Waste Prevented
+                  </span>
+
+                  <strong>
+                    {stats.kg.toFixed(1)} kg
+                  </strong>
+
+                  <small>
+                    Kept away from waste
+                  </small>
+
+                </div>
+
+              </div>
+
+              <div className="stat-card purple">
+
+                <div className="stat-icon">
+                  🌱
+                </div>
+
+                <div>
+
+                  <span>
+                    CO₂e Avoided
+                  </span>
+
+                  <strong>
+                    {stats.co2.toFixed(1)} kg
+                  </strong>
+
+                  <small>
+                    Environmental impact
+                  </small>
+
+                </div>
+
+              </div>
+
+            </section>
+
+            {/* HOW IT WORKS */}
+
+            <section className="section">
+
+              <div className="section-heading">
+
+                <div>
+
+                  <h2>
+                    How it works
+                  </h2>
+
+                  <p>
+                    From surplus food to
+                    community support.
+                  </p>
+
+                </div>
+
+              </div>
+
+              <div className="steps-grid">
+
+                <div className="step-card">
+
+                  <div className="step-number">
+                    01
+                  </div>
+
+                  <div className="step-icon">
+                    📦
+                  </div>
+
+                  <h3>
+                    Food Donated
+                  </h3>
+
+                  <p>
+                    Donor posts available
+                    surplus food and its
+                    safe consumption time.
+                  </p>
+
+                </div>
+
+                <div className="step-card">
+
+                  <div className="step-number">
+                    02
+                  </div>
+
+                  <div className="step-icon">
+                    🏠
+                  </div>
+
+                  <h3>
+                    NGO Matched
+                  </h3>
+
+                  <p>
+                    The platform identifies
+                    a suitable community
+                    recipient.
+                  </p>
+
+                </div>
+
+                <div className="step-card">
+
+                  <div className="step-number">
+                    03
+                  </div>
+
+                  <div className="step-icon">
+                    🚗
+                  </div>
+
+                  <h3>
+                    Pickup
+                  </h3>
+
+                  <p>
+                    A delivery partner
+                    collects the food from
+                    the donor.
+                  </p>
+
+                </div>
+
+                <div className="step-card">
+
+                  <div className="step-number">
+                    04
+                  </div>
+
+                  <div className="step-icon">
+                    ❤️
+                  </div>
+
+                  <h3>
+                    Food Delivered
+                  </h3>
+
+                  <p>
+                    Food reaches the NGO
+                    instead of becoming waste.
+                  </p>
+
+                </div>
+
+              </div>
+
+            </section>
+
+            {/* COMMUNITY NETWORK */}
+
+            <section className="section">
+
+              <div className="section-heading">
+
+                <div>
+
+                  <h2>
+                    Community Network
+                  </h2>
+
+                  <p>
+                    Organisations and people
+                    working together.
+                  </p>
+
+                </div>
+
+              </div>
+
+              <div className="network-section">
+
+                <div className="network-card">
+
+                  <span>
+                    🏢
+                  </span>
+
+                  <div>
+
+                    <strong>
+                      Food Donors
+                    </strong>
+
+                    <p>
+                      Restaurants,
+                      caterers & campuses
+                    </p>
+
+                    <small>
+                      Green Leaf Caterers •
+                      City Bites • Amity Campus
+                    </small>
+
+                  </div>
+
+                </div>
+
+                <div className="network-card">
+
+                  <span>
+                    🏠
+                  </span>
+
+                  <div>
+
+                    <strong>
+                      NGO Partners
+                    </strong>
+
+                    <p>
+                      Shelters &
+                      community organisations
+                    </p>
+
+                    <small>
+                      Annapurna Shelter •
+                      Feeding Hands Jaipur •
+                      Seva Kitchen Jaipur
+                    </small>
+
+                  </div>
+
+                </div>
+
+                <div className="network-card">
+
+                  <span>
+                    🚗
+                  </span>
+
+                  <div>
+
+                    <strong>
+                      Delivery Partners
+                    </strong>
+
+                    <p>
+                      Pickup & delivery
+                      support
+                    </p>
+
+                    <small>
+                      Rahul • Aman • Priya •
+                      Neha • Vikas
+                    </small>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+            </section>
+
+          </>
+
+        )}
+
+        {/* ===================================================
+            FOOD DONATIONS
+        =================================================== */}
+
+        {activeTab ===
+          "Donations" && (
+
+          <section className="content-card">
+
+            <div className="page-title">
+
+              <div>
+
+                <h2 className="donate-heading">
+                  📦 Donate Surplus Food
+                </h2>
+
+                <p>
+                  Provide food details so
+                  we can find a suitable
+                  community recipient.
+                </p>
+
+              </div>
+
+              <div className="safe-badge">
+                🛡️ Food Safety
               </div>
 
             </div>
 
-            {/* NGO */}
+            <form
+              className="donation-form"
+              onSubmit={handleSubmit}
+            >
 
-            {donation.matchedNGO && (
+              <div className="form-row">
 
-              <div className="ngo-box">
+                <div className="field">
 
-                <h3>
-                  🏠 Matched NGO
-                </h3>
+                  <label>
+                    Food Type
+                  </label>
 
-                <p>
-                  <strong>
-                    Name:
-                  </strong>{" "}
-                  {donation.matchedNGO.name}
-                </p>
+                  <input
+                    type="text"
+                    value={foodType}
+                    onChange={(e) =>
+                      setFoodType(
+                        e.target.value
+                      )
+                    }
+                    placeholder="e.g. Cooked Meals, Rice, Dal"
+                    required
+                  />
 
-                <p>
-                  <strong>
-                    Location:
-                  </strong>{" "}
-                  {donation.matchedNGO.location}
-                </p>
+                </div>
 
-                <p>
-                  <strong>
-                    Capacity:
-                  </strong>{" "}
-                  {donation.matchedNGO.capacity} kg
-                </p>
+                <div className="field">
 
-                <p>
-                  <strong>
-                    Need:
-                  </strong>{" "}
-                  {donation.matchedNGO.need.toUpperCase()}
-                </p>
+                  <label>
+                    Quantity
+                  </label>
+
+                  <div className="input-unit">
+
+                    <input
+                      type="number"
+                      min="1"
+                      value={quantity}
+                      onChange={(e) =>
+                        setQuantity(
+                          e.target.value
+                        )
+                      }
+                      placeholder="20"
+                      required
+                    />
+
+                    <span>
+                      kg
+                    </span>
+
+                  </div>
+
+                </div>
 
               </div>
 
-            )}
+              <div className="form-row">
 
-            {/* DRIVER */}
+                <div className="field">
 
-            {donation.driver && (
+                  <label>
+                    Pickup Location
+                  </label>
 
-              <div className="driver-box">
+                  <input
+                    type="text"
+                    value={location}
+                    onChange={(e) =>
+                      setLocation(
+                        e.target.value
+                      )
+                    }
+                    placeholder="C-Scheme, Jaipur"
+                    required
+                  />
 
-                <h3>
-                  🚗 Driver Tracking
-                </h3>
+                </div>
 
-                <p>
-                  <strong>
-                    Driver:
-                  </strong>{" "}
-                  {donation.driver.name}
-                </p>
+                <div className="field">
 
-                <p>
-                  <strong>
-                    Phone:
-                  </strong>{" "}
-                  {donation.driver.phone}
-                </p>
+                  <label>
+                    Safe Until
+                  </label>
 
-                <p>
-                  <strong>
-                    Status:
-                  </strong>{" "}
-                  {donation.driver.status}
-                </p>
+                  <input
+                    type="time"
+                    value={expiryTime}
+                    onChange={(e) =>
+                      setExpiryTime(
+                        e.target.value
+                      )
+                    }
+                    required
+                  />
 
-                {driverLocation && (
+                </div>
 
-                  <div className="location-box">
+              </div>
+
+              <button
+                className="primary-btn"
+                type="submit"
+                disabled={loading}
+              >
+                {loading
+                  ? "MATCHING WITH NGO..."
+                  : "POST FOOD & FIND NGO"}
+              </button>
+
+            </form>
+
+            {/* DONATION RESULT */}
+
+            {donation && (
+
+              <div className="result-section">
+
+                <div className="success-header">
+
+                  <div className="success-icon">
+                    ✓
+                  </div>
+
+                  <div>
 
                     <h3>
-                      📍 Live Driver Location
+                      Food Donation Matched
                     </h3>
 
                     <p>
-                      <strong>
-                        Current Area:
-                      </strong>{" "}
-                      {
-                        driverLocation.currentArea
-                      }
+                      A suitable community
+                      recipient has been found.
                     </p>
 
-                    <p>
-                      <strong>
-                        Destination:
-                      </strong>{" "}
-                      {
-                        donation
-                          .matchedNGO
-                          ?.name
-                      }
-                    </p>
+                  </div>
+
+                </div>
+
+                <div className="result-grid">
+
+                  <div className="info-box">
+
+                    <span>
+                      DONATED FOOD
+                    </span>
+
+                    <h3>
+                      🍱{" "}
+                      {donation.foodType}
+                    </h3>
 
                     <p>
-                      <strong>
-                        Distance Remaining:
-                      </strong>{" "}
-                      {
-                        driverLocation.distance.toFixed(
-                          1
-                        )
-                      }{" "}
-                      km
+                      {donation.quantity} kg
+                      <br />
+                      📍 {donation.location}
                     </p>
 
-                    <p>
-                      <strong>
-                        Estimated Arrival:
-                      </strong>{" "}
-                      {
-                        driverLocation.eta
-                      }{" "}
-                      min
-                    </p>
+                  </div>
 
-                    <p>
-                      🟢 Driver is on the way
-                    </p>
+                  {donation.matchedNGO && (
 
-                    <p>
-                      🔄 Route updates every
-                      3 seconds
-                    </p>
+                    <div className="info-box">
+
+                      <span>
+                        COMMUNITY RECIPIENT
+                      </span>
+
+                      <h3>
+                        🏠{" "}
+                        {
+                          donation
+                            .matchedNGO
+                            .name
+                        }
+                      </h3>
+
+                      <p>
+                        📍{" "}
+                        {
+                          donation
+                            .matchedNGO
+                            .location
+                        }
+                        <br />
+                        Capacity:{" "}
+                        {
+                          donation
+                            .matchedNGO
+                            .capacity
+                        } kg
+                      </p>
+
+                    </div>
+
+                  )}
+
+                </div>
+
+                {/* STATUS TIMELINE */}
+
+                <div className="timeline">
+
+                  {statusOrder.map(
+                    (status, index) => (
+
+                      <div
+                        className={
+                          isStatusActive(
+                            status
+                          )
+                            ? "timeline-item active"
+                            : "timeline-item"
+                        }
+                        key={status}
+                      >
+
+                        <div className="timeline-dot">
+
+                          {isStatusActive(
+                            status
+                          )
+                            ? "✓"
+                            : index + 1}
+
+                        </div>
+
+                        <span>
+
+                          {status ===
+                          "DRIVER ASSIGNED"
+                            ? "DRIVER"
+                            : status}
+
+                        </span>
+
+                      </div>
+
+                    )
+                  )}
+
+                </div>
+
+                {/* ASSIGN DRIVER */}
+
+                {donation.status ===
+                  "MATCHED" && (
+
+                  <button
+                    className="primary-btn"
+                    onClick={
+                      assignDriver
+                    }
+                  >
+                    🚗 ASSIGN DRIVER
+                  </button>
+
+                )}
+
+                {/* PICKUP */}
+
+                {donation.status ===
+                  "DRIVER ASSIGNED" && (
+
+                  <button
+                    className="primary-btn"
+                    onClick={() =>
+                      updateStatus(
+                        "PICKED UP"
+                      )
+                    }
+                  >
+                    📦 CONFIRM FOOD PICKUP
+                  </button>
+
+                )}
+
+                {/* DELIVER */}
+
+                {donation.status ===
+                  "PICKED UP" && (
+
+                  <button
+                    className="primary-btn"
+                    onClick={() =>
+                      updateStatus(
+                        "DELIVERED"
+                      )
+                    }
+                  >
+                    🏠 CONFIRM FOOD DELIVERED
+                  </button>
+
+                )}
+
+                {/* DELIVERED */}
+
+                {donation.status ===
+                  "DELIVERED" && (
+
+                  <div className="delivered-box">
+
+                    🎉 Food Delivered Successfully
+
+                    <br />
+
+                    ♻️ This food was kept
+                    from becoming waste.
 
                   </div>
 
@@ -699,82 +1460,684 @@ function App() {
 
             )}
 
-            {/* ASSIGN DRIVER */}
+          </section>
 
-            {donation.status ===
-              "MATCHED" && (
+        )}
 
-              <button
-                className="action-btn"
-                onClick={
-                  assignDriver
-                }
-              >
-                🚗 ASSIGN DRIVER
-              </button>
+        {/* ===================================================
+            DRIVER TRACKING
+        =================================================== */}
 
-            )}
+        {activeTab ===
+          "Tracking" && (
 
-            {/* PICKUP */}
+          <section className="content-card">
 
-            {donation.status ===
-              "DRIVER ASSIGNED" && (
+            <div className="page-title">
 
-              <button
-                className="action-btn"
-                onClick={() =>
-                  updateStatus(
-                    "PICKED UP"
-                  )
-                }
-              >
-                📦 MARK AS PICKED UP
-              </button>
+              <div>
 
-            )}
+                <h2>
+                  🚗 Driver Tracking
+                </h2>
 
-            {/* DELIVERY */}
+                <p>
+                  Track the food delivery
+                  from donor to NGO.
+                </p>
 
-            {donation.status ===
-              "PICKED UP" && (
+              </div>
 
-              <button
-                className="action-btn"
-                onClick={() =>
-                  updateStatus(
-                    "DELIVERED"
-                  )
-                }
-              >
-                🏠 MARK AS DELIVERED
-              </button>
+              <div className="live-badge">
 
-            )}
+                <span />
 
-            {/* SUCCESS */}
+                LIVE
 
-            {donation.status ===
-              "DELIVERED" && (
+              </div>
 
-              <div className="success-box">
+            </div>
 
-                🎉 Food successfully
-                delivered!
+            {donation &&
+            donation.driver ? (
 
-                <br />
+              <div className="tracking-layout">
 
-                ❤️ Another surplus meal
-                saved from waste.
+                {/* ROUTE CARD */}
+
+                <div className="route-card">
+
+                  <div className="route-header">
+
+                    <span>
+                      DRIVER LOCATION
+                    </span>
+
+                    <strong>
+                      📍 Near:{" "}
+                      {driverLocation?.currentArea ??
+                        donation.driver
+                          .currentArea}
+                    </strong>
+
+                    <div className="heading-text">
+
+                      🏁 Heading to:{" "}
+
+                      {driverLocation?.headingTo ??
+                        donation.driver
+                          .headingTo}
+
+                    </div>
+
+                  </div>
+
+                  {/* ROUTE */}
+
+                  <div className="route-line">
+
+                    <div className="route-point">
+
+                      <div className="point active-point">
+                        🚗
+                      </div>
+
+                      <span>
+                        Driver
+                      </span>
+
+                    </div>
+
+                    <div className="route-progress">
+
+                      <div
+                        style={{
+                          width: `${getDriverProgress()}%`,
+                        }}
+                      />
+
+                    </div>
+
+                    <div className="route-point">
+
+                      <div className="point">
+                        🏠
+                      </div>
+
+                      <span>
+                        NGO
+                      </span>
+
+                    </div>
+
+                  </div>
+
+                  <div className="route-progress-label">
+
+                    {donation.status ===
+                    "DRIVER ASSIGNED"
+                      ? "Driver is waiting at pickup location"
+                      : donation.status ===
+                          "DELIVERED" ||
+                        (driverLocation?.distance ??
+                          donation?.driver?.distance ??
+                          0) <= 0
+                      ? "Driver has reached the NGO"
+                      : "Driver is moving towards the NGO"}
+
+                  </div>
+
+                  {/* ROUTE STATS */}
+
+                  <div className="route-stats">
+
+                    <div>
+
+                      <span>
+                        DISTANCE
+                      </span>
+
+                      <strong>
+                        {(
+                          driverLocation?.distance ??
+                          donation.driver
+                            .distance ??
+                          0
+                        ).toFixed(1)}{" "}
+                        km
+                      </strong>
+
+                    </div>
+
+                    <div>
+
+                      <span>
+                        ETA
+                      </span>
+
+                      <strong>
+                        {driverLocation?.eta ??
+                          donation.driver
+                            .eta ??
+                          0}{" "}
+                        min
+                      </strong>
+
+                    </div>
+
+                    <div>
+
+                      <span>
+                        STATUS
+                      </span>
+
+                      <strong>
+                        {donation.status}
+                      </strong>
+
+                    </div>
+
+                  </div>
+
+                  {/* ACTION */}
+
+                  <div className="tracking-action">
+
+                    {donation.status ===
+                      "DRIVER ASSIGNED" && (
+
+                      <button
+                        className="primary-btn"
+                        onClick={() =>
+                          updateStatus(
+                            "PICKED UP"
+                          )
+                        }
+                      >
+                        📦 CONFIRM FOOD PICKUP
+                      </button>
+
+                    )}
+
+                    {donation.status ===
+                      "PICKED UP" && (
+
+                      <button
+                        className="primary-btn"
+                        onClick={() =>
+                          updateStatus(
+                            "DELIVERED"
+                          )
+                        }
+                      >
+                        🏠 CONFIRM FOOD DELIVERED
+                      </button>
+
+                    )}
+
+                    {donation.status ===
+                      "DELIVERED" && (
+
+                      <div className="delivered-box">
+
+                        🎉 Food Delivered Successfully
+
+                        <br />
+
+                        ♻️ Food reached the
+                        community instead
+                        of becoming waste.
+
+                      </div>
+
+                    )}
+
+                  </div>
+
+                </div>
+
+                {/* DRIVER PROFILE */}
+
+                <div className="driver-profile">
+
+                  <div className="driver-avatar">
+                    {getDriverIcon()}
+                  </div>
+
+                  <h3>
+                    {donation.driver.name}
+                  </h3>
+
+                  <p>
+                    Delivery Driver
+                  </p>
+
+                  <div className="driver-status">
+
+                    🟢{" "}
+                    {donation.driver.status}
+
+                  </div>
+
+                  <hr />
+
+                  <p>
+                    📞{" "}
+                    {donation.driver.phone}
+                  </p>
+
+                  <p>
+                    📍 Near:{" "}
+                    {driverLocation?.currentArea ??
+                      donation.driver
+                        .currentArea}
+                  </p>
+
+                  <p>
+                    🏁 Heading to:{" "}
+                    {driverLocation?.headingTo ??
+                      donation.driver
+                        .headingTo}
+                  </p>
+
+                  {donation.matchedNGO && (
+
+                    <p>
+                      🏠 NGO:{" "}
+                      {
+                        donation
+                          .matchedNGO
+                          .name
+                      }
+                    </p>
+
+                  )}
+
+                </div>
+
+              </div>
+
+            ) : (
+
+              <div className="empty-state">
+
+                <div>
+                  🚗
+                </div>
+
+                <h3>
+                  No Active Delivery
+                </h3>
+
+                <p>
+                  Assign a driver to
+                  start tracking.
+                </p>
+
+                <button
+                  className="primary-btn small-btn"
+                  onClick={() =>
+                    setActiveTab(
+                      "Donations"
+                    )
+                  }
+                >
+                  View Food Donation
+                </button>
 
               </div>
 
             )}
 
-          </div>
+          </section>
 
         )}
 
-      </div>
+        {/* ===================================================
+            COMMUNITY IMPACT
+        =================================================== */}
+
+        {activeTab ===
+          "Impact" && (
+
+          <section className="content-card">
+
+            <div className="page-title">
+
+              <div>
+
+                <h2>
+                  🌱 Community Impact
+                </h2>
+
+                <p>
+                  See how much food has
+                  been delivered to
+                  communities.
+                </p>
+
+              </div>
+
+            </div>
+
+            <div className="impact-big-grid">
+
+              <div className="impact-big green-impact">
+
+                <span>
+                  🍽️
+                </span>
+
+                <strong>
+                  {stats.meals}
+                </strong>
+
+                <p>
+                  Meals Served
+                </p>
+
+              </div>
+
+              <div className="impact-big orange-impact">
+
+                <span>
+                  📦
+                </span>
+
+                <strong>
+                  {stats.kg.toFixed(1)}
+                </strong>
+
+                <p>
+                  kg Food Delivered
+                </p>
+
+              </div>
+
+              <div className="impact-big blue-impact">
+
+                <span>
+                  ♻️
+                </span>
+
+                <strong>
+                  {stats.kg.toFixed(1)}
+                </strong>
+
+                <p>
+                  kg Waste Prevented
+                </p>
+
+              </div>
+
+              <div className="impact-big purple-impact">
+
+                <span>
+                  🌱
+                </span>
+
+                <strong>
+                  {stats.co2.toFixed(1)}
+                </strong>
+
+                <p>
+                  kg CO₂e Avoided
+                </p>
+
+              </div>
+
+            </div>
+
+            <div className="impact-message">
+
+              <div>
+                🤝
+              </div>
+
+              <div>
+
+                <h3>
+                  Every donation can
+                  make a difference.
+                </h3>
+
+                <p>
+                  Surplus edible food is
+                  matched with community
+                  organisations and delivered
+                  before it becomes waste.
+                </p>
+
+              </div>
+
+            </div>
+
+          </section>
+
+        )}
+
+        {/* ===================================================
+            SETTINGS
+        =================================================== */}
+
+        {activeTab ===
+          "Settings" && (
+
+          <section className="content-card">
+
+            <div className="page-title">
+
+              <div>
+
+                <h2>
+                  ⚙️ Settings
+                </h2>
+
+                <p>
+                  Manage your platform
+                  preferences.
+                </p>
+
+              </div>
+
+            </div>
+
+            <div className="settings-page">
+
+              <div className="settings-section">
+
+                <h3>
+                  Profile
+                </h3>
+
+                <div className="settings-fields">
+
+                  <div className="field">
+
+                    <label>
+                      Organisation Name
+                    </label>
+
+                    <input
+                      value="BrainByte"
+                      readOnly
+                    />
+
+                  </div>
+
+                  <div className="field">
+
+                    <label>
+                      City
+                    </label>
+
+                    <input
+                      value={
+                        settings.defaultCity
+                      }
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          defaultCity:
+                            e.target.value,
+                        })
+                      }
+                    />
+
+                  </div>
+
+                </div>
+
+              </div>
+
+              <div className="settings-section">
+
+                <h3>
+                  Notifications
+                </h3>
+
+                <label className="toggle-row">
+
+                  <span>
+                    Donation Alerts
+                  </span>
+
+                  <input
+                    type="checkbox"
+                    checked={
+                      settings.donationAlerts
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        donationAlerts:
+                          e.target.checked,
+                      })
+                    }
+                  />
+
+                </label>
+
+                <label className="toggle-row">
+
+                  <span>
+                    Driver Updates
+                  </span>
+
+                  <input
+                    type="checkbox"
+                    checked={
+                      settings.driverUpdates
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        driverUpdates:
+                          e.target.checked,
+                      })
+                    }
+                  />
+
+                </label>
+
+                <label className="toggle-row">
+
+                  <span>
+                    Delivery Updates
+                  </span>
+
+                  <input
+                    type="checkbox"
+                    checked={
+                      settings.deliveryUpdates
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        deliveryUpdates:
+                          e.target.checked,
+                      })
+                    }
+                  />
+
+                </label>
+
+              </div>
+
+              <div className="settings-section">
+
+                <h3>
+                  Food Safety
+                </h3>
+
+                <div className="field">
+
+                  <label>
+                    Default Safety Buffer
+                  </label>
+
+                  <select
+                    value={
+                      settings.safetyBuffer
+                    }
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        safetyBuffer:
+                          e.target.value,
+                      })
+                    }
+                  >
+
+                    <option>
+                      1 hour
+                    </option>
+
+                    <option>
+                      2 hours
+                    </option>
+
+                    <option>
+                      3 hours
+                    </option>
+
+                    <option>
+                      4 hours
+                    </option>
+
+                  </select>
+
+                </div>
+
+              </div>
+
+              <div className="about-box">
+
+                <h3>
+                  About Surplus-to-Shelter
+                </h3>
+
+                <p>
+                  A community-focused platform
+                  that helps connect surplus
+                  edible food with NGOs and
+                  shelters before it becomes
+                  waste.
+                </p>
+
+                <small>
+                  AmiHacks 1.0 • BrainByte
+                </small>
+
+              </div>
+
+            </div>
+
+          </section>
+
+        )}
+
+      </main>
 
     </div>
   );
