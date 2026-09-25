@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
+const API = "http://127.0.0.1:5000/api";
+
 function App() {
   const [foodType, setFoodType] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -8,7 +10,9 @@ function App() {
   const [expiryTime, setExpiryTime] = useState("");
 
   const [donation, setDonation] = useState(null);
+  const [donations, setDonations] = useState([]);
   const [loading, setLoading] = useState(false);
+
   const [driverLocation, setDriverLocation] = useState(null);
 
   const [activeTab, setActiveTab] = useState("Dashboard");
@@ -16,6 +20,21 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] =
     useState(false);
+
+  const [historyFilter, setHistoryFilter] =
+    useState("ALL");
+
+  const [editingDonation, setEditingDonation] =
+    useState(null);
+
+  const [editFoodType, setEditFoodType] =
+    useState("");
+  const [editQuantity, setEditQuantity] =
+    useState("");
+  const [editLocation, setEditLocation] =
+    useState("");
+  const [editExpiryTime, setEditExpiryTime] =
+    useState("");
 
   const [settings, setSettings] = useState({
     donationAlerts: true,
@@ -49,6 +68,59 @@ function App() {
   };
 
   /* =========================================================
+     FETCH DONATIONS
+  ========================================================= */
+
+  const fetchDonations = async () => {
+    try {
+      const response = await fetch(
+        `${API}/donations`
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setDonations(data);
+
+        /*
+          Keep the currently selected donation
+          synchronized with backend.
+        */
+        if (donation) {
+          const updated = data.find(
+            (item) => item.id === donation.id
+          );
+
+          if (updated) {
+            setDonation(updated);
+
+            if (updated.driver) {
+              setDriverLocation({
+                currentArea:
+                  updated.driver.currentArea,
+                headingTo:
+                  updated.driver.headingTo,
+                eta: updated.driver.eta,
+                distance:
+                  updated.driver.distance,
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error(
+        "Could not load donations:",
+        error
+      );
+    }
+  };
+
+  useEffect(() => {
+    fetchDonations();
+  }, []);
+
+  /* =========================================================
      CREATE DONATION
   ========================================================= */
 
@@ -59,11 +131,12 @@ function App() {
 
     try {
       const response = await fetch(
-        "http://127.0.0.1:5000/api/donations",
+        `${API}/donations`,
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type":
+              "application/json",
           },
           body: JSON.stringify({
             foodType,
@@ -78,12 +151,13 @@ function App() {
 
       if (!response.ok) {
         throw new Error(
-          data.message || "Donation failed"
+          data.message ||
+            "Donation failed"
         );
       }
 
       const matchResponse = await fetch(
-        `http://127.0.0.1:5000/api/match/${data.donation.id}`,
+        `${API}/match/${data.donation.id}`,
         {
           method: "POST",
         }
@@ -101,6 +175,15 @@ function App() {
 
       setDonation(matchData.donation);
 
+      setDonations((prev) => [
+        matchData.donation,
+        ...prev.filter(
+          (item) =>
+            item.id !==
+            matchData.donation.id
+        ),
+      ]);
+
       const donatedKg = Number(
         matchData.donation.quantity
       );
@@ -109,7 +192,9 @@ function App() {
         ...prev,
         meals:
           prev.meals +
-          Math.round(donatedKg * 2),
+          Math.round(
+            donatedKg * 2
+          ),
         kg:
           prev.kg + donatedKg,
         co2: Number(
@@ -146,6 +231,165 @@ function App() {
   };
 
   /* =========================================================
+     EDIT DONATION
+  ========================================================= */
+
+  const openEditDonation = (item) => {
+    if (
+      item.status !== "POSTED" &&
+      item.status !== "MATCHED"
+    ) {
+      alert(
+        "This donation can no longer be edited."
+      );
+      return;
+    }
+
+    setEditingDonation(item);
+
+    setEditFoodType(
+      item.foodType || ""
+    );
+
+    setEditQuantity(
+      item.quantity || ""
+    );
+
+    setEditLocation(
+      item.location || ""
+    );
+
+    setEditExpiryTime(
+      item.expiryTime || ""
+    );
+  };
+
+  const closeEditDonation = () => {
+    setEditingDonation(null);
+    setEditFoodType("");
+    setEditQuantity("");
+    setEditLocation("");
+    setEditExpiryTime("");
+  };
+
+  const saveEditedDonation = async () => {
+    if (!editingDonation) return;
+
+    try {
+      const response = await fetch(
+        `${API}/donations/${editingDonation.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            foodType: editFoodType,
+            quantity: editQuantity,
+            location: editLocation,
+            expiryTime: editExpiryTime,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Could not update donation"
+        );
+      }
+
+      setDonation(data.donation);
+
+      setDonations((prev) =>
+        prev.map((item) =>
+          item.id ===
+          data.donation.id
+            ? data.donation
+            : item
+        )
+      );
+
+      addNotification(
+        "Donation Updated",
+        "Your donation details have been updated successfully."
+      );
+
+      closeEditDonation();
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  /* =========================================================
+     CANCEL DONATION
+  ========================================================= */
+
+  const cancelDonation = async (item = donation) => {
+    if (!item) return;
+
+    if (
+      item.status === "PICKED UP" ||
+      item.status === "DELIVERED" ||
+      item.status === "CANCELLED"
+    ) {
+      alert(
+        "This donation cannot be cancelled at this stage."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Are you sure you want to cancel this donation?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(
+        `${API}/donations/${item.id}/cancel`,
+        {
+          method: "PUT",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Could not cancel donation"
+        );
+      }
+
+      setDonation(data.donation);
+
+      setDonations((prev) =>
+        prev.map((item) =>
+          item.id ===
+          data.donation.id
+            ? data.donation
+            : item
+        )
+      );
+
+      setDriverLocation(null);
+
+      addNotification(
+        "Donation Cancelled",
+        "The donation has been cancelled successfully."
+      );
+
+      setActiveTab("History");
+    } catch (error) {
+      alert(error.message);
+    }
+  };
+
+  /* =========================================================
      ASSIGN DRIVER
   ========================================================= */
 
@@ -154,7 +398,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:5000/api/assign-driver/${donation.id}`,
+        `${API}/assign-driver/${donation.id}`,
         {
           method: "POST",
         }
@@ -172,21 +416,32 @@ function App() {
 
       setDonation(data.donation);
 
-      setDriverLocation({
-        currentArea:
-          data.donation.driver
-            .currentArea,
+      setDonations((prev) =>
+        prev.map((item) =>
+          item.id ===
+          data.donation.id
+            ? data.donation
+            : item
+        )
+      );
 
-        headingTo:
-          data.donation.driver
-            .headingTo,
+      if (data.donation.driver) {
+        setDriverLocation({
+          currentArea:
+            data.donation.driver
+              .currentArea,
 
-        eta:
-          data.donation.driver.eta,
+          headingTo:
+            data.donation.driver
+              .headingTo,
 
-        distance:
-          data.donation.driver.distance,
-      });
+          eta:
+            data.donation.driver.eta,
+
+          distance:
+            data.donation.driver.distance,
+        });
+      }
 
       if (settings.driverUpdates) {
         addNotification(
@@ -203,27 +458,24 @@ function App() {
 
   /* =========================================================
      LIVE DRIVER LOCATION
-
-     IMPORTANT:
-     Driver starts moving ONLY after
-     food has been picked up.
   ========================================================= */
 
   useEffect(() => {
     if (
       !donation ||
       !donation.driver ||
-      donation.status !== "PICKED UP"
+      donation.status !==
+        "PICKED UP"
     ) {
       return;
     }
 
-    const interval = setInterval(
-      async () => {
+    const interval =
+      setInterval(async () => {
         try {
           const response =
             await fetch(
-              `http://127.0.0.1:5000/api/driver-location/${donation.id}`,
+              `${API}/driver-location/${donation.id}`,
               {
                 method: "PUT",
               }
@@ -235,6 +487,15 @@ function App() {
           if (data.donation) {
             setDonation(
               data.donation
+            );
+
+            setDonations((prev) =>
+              prev.map((item) =>
+                item.id ===
+                data.donation.id
+                  ? data.donation
+                  : item
+              )
             );
 
             if (
@@ -265,9 +526,7 @@ function App() {
             error
           );
         }
-      },
-      3000
-    );
+      }, 3000);
 
     return () =>
       clearInterval(interval);
@@ -287,7 +546,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:5000/api/donation-status/${donation.id}`,
+        `${API}/donation-status/${donation.id}`,
         {
           method: "PUT",
           headers: {
@@ -312,6 +571,15 @@ function App() {
 
       setDonation(
         data.donation
+      );
+
+      setDonations((prev) =>
+        prev.map((item) =>
+          item.id ===
+          data.donation.id
+            ? data.donation
+            : item
+        )
       );
 
       if (data.donation.driver) {
@@ -346,7 +614,9 @@ function App() {
           );
         }
 
-        setActiveTab("Tracking");
+        setActiveTab(
+          "Tracking"
+        );
       }
 
       if (
@@ -388,6 +658,13 @@ function App() {
     status
   ) => {
     if (!donation) return false;
+
+    if (
+      donation.status ===
+      "CANCELLED"
+    ) {
+      return false;
+    }
 
     return (
       statusOrder.indexOf(
@@ -442,13 +719,120 @@ function App() {
 
     const progress =
       100 -
-      (distance / 4.2) * 100;
+      (distance / 4.2) *
+        100;
 
     return Math.min(
       100,
       Math.max(8, progress)
     );
   };
+
+  /* =========================================================
+     SIMULATED LIVE ROUTE MAP
+  ========================================================= */
+
+  const getRouteNodes = () => {
+    const route = donation?.driver?.route || donation?.route || [];
+    if (Array.isArray(route) && route.length > 0) return route;
+    return [
+      donation?.location || "Pickup Location",
+      driverLocation?.currentArea || donation?.driver?.currentArea || "En route",
+      donation?.matchedNGO?.name || "NGO Destination",
+    ];
+  };
+
+  const getRouteIndex = () => {
+    const index = Number(donation?.driver?.routeIndex ?? donation?.driver?.currentRouteIndex ?? 0);
+    return Number.isFinite(index) ? Math.max(0, index) : 0;
+  };
+
+  const getMapProgress = () => {
+    if (!donation?.driver) return 0;
+    if (donation.status === "DELIVERED") return 100;
+    const nodes = getRouteNodes();
+    if (nodes.length <= 1) return getDriverProgress();
+    return Math.min(100, Math.max(0, (Math.min(getRouteIndex(), nodes.length - 1) / (nodes.length - 1)) * 100));
+  };
+
+  /* =========================================================
+     STATUS BADGE
+  ========================================================= */
+
+  const getStatusClass = (
+    status
+  ) => {
+    switch (status) {
+      case "DELIVERED":
+        return "status-delivered";
+
+      case "CANCELLED":
+        return "status-cancelled";
+
+      case "PICKED UP":
+        return "status-picked";
+
+      case "DRIVER ASSIGNED":
+        return "status-assigned";
+
+      case "MATCHED":
+        return "status-matched";
+
+      default:
+        return "status-posted";
+    }
+  };
+
+  /* =========================================================
+     FORMAT DATE
+  ========================================================= */
+
+  const formatDate = (date) => {
+    if (!date) return "—";
+
+    try {
+      return new Date(
+        date
+      ).toLocaleString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "—";
+    }
+  };
+
+  /* =========================================================
+     HISTORY FILTER
+  ========================================================= */
+
+  const filteredDonations =
+    donations.filter((item) => {
+      if (
+        historyFilter === "ALL"
+      ) {
+        return true;
+      }
+
+      if (
+        historyFilter === "ACTIVE"
+      ) {
+        return (
+          item.status !==
+            "DELIVERED" &&
+          item.status !==
+            "CANCELLED"
+        );
+      }
+
+      return (
+        item.status ===
+        historyFilter
+      );
+    });
 
   return (
     <div className="app">
@@ -514,6 +898,26 @@ function App() {
             📦
             <span>
               Food Donations
+            </span>
+          </button>
+
+          <button
+            className={
+              activeTab ===
+              "History"
+                ? "nav-item active"
+                : "nav-item"
+            }
+            onClick={() => {
+              fetchDonations();
+              setActiveTab(
+                "History"
+              );
+            }}
+          >
+            📋
+            <span>
+              Donation History
             </span>
           </button>
 
@@ -610,7 +1014,10 @@ function App() {
           <div>
 
             <h1>
-              {activeTab}
+              {activeTab ===
+              "History"
+                ? "Donation History"
+                : activeTab}
             </h1>
 
             <p>
@@ -1270,12 +1677,23 @@ function App() {
                   <div>
 
                     <h3>
-                      Food Donation Matched
+                      {donation.status ===
+                      "CANCELLED"
+                        ? "Donation Cancelled"
+                        : donation.status ===
+                          "DELIVERED"
+                        ? "Food Donation Completed"
+                        : "Food Donation Matched"}
                     </h3>
 
                     <p>
-                      A suitable community
-                      recipient has been found.
+                      {donation.status ===
+                      "CANCELLED"
+                        ? "This donation is no longer active."
+                        : donation.status ===
+                          "DELIVERED"
+                        ? "The donation has successfully reached the community."
+                        : "A suitable community recipient has been found."}
                     </p>
 
                   </div>
@@ -1299,6 +1717,9 @@ function App() {
                       {donation.quantity} kg
                       <br />
                       📍 {donation.location}
+                      <br />
+                      🕒 Safe until{" "}
+                      {donation.expiryTime}
                     </p>
 
                   </div>
@@ -1344,47 +1765,139 @@ function App() {
 
                 {/* STATUS TIMELINE */}
 
-                <div className="timeline">
+                {donation.status !==
+                  "CANCELLED" ? (
 
-                  {statusOrder.map(
-                    (status, index) => (
+                  <div className="timeline">
 
-                      <div
-                        className={
-                          isStatusActive(
-                            status
-                          )
-                            ? "timeline-item active"
-                            : "timeline-item"
-                        }
-                        key={status}
-                      >
+                    {statusOrder.map(
+                      (status, index) => (
 
-                        <div className="timeline-dot">
+                        <div
+                          className={
+                            isStatusActive(
+                              status
+                            )
+                              ? "timeline-item active"
+                              : "timeline-item"
+                          }
+                          key={status}
+                        >
 
-                          {isStatusActive(
-                            status
-                          )
-                            ? "✓"
-                            : index + 1}
+                          <div className="timeline-dot">
+
+                            {isStatusActive(
+                              status
+                            )
+                              ? "✓"
+                              : index + 1}
+
+                          </div>
+
+                          <span>
+
+                            {status ===
+                            "DRIVER ASSIGNED"
+                              ? "DRIVER"
+                              : status}
+
+                          </span>
 
                         </div>
 
-                        <span>
+                      )
+                    )}
 
-                          {status ===
-                          "DRIVER ASSIGNED"
-                            ? "DRIVER"
-                            : status}
+                  </div>
 
-                        </span>
+                ) : (
 
-                      </div>
+                  <div
+                    style={{
+                      marginTop:
+                        "20px",
+                      padding:
+                        "16px",
+                      borderRadius:
+                        "12px",
+                      background:
+                        "#fff1f1",
+                      color:
+                        "#a33",
+                      fontWeight:
+                        "600",
+                    }}
+                  >
+                    ❌ CANCELLED
+                  </div>
 
-                    )
-                  )}
+                )}
 
-                </div>
+                {/* DONATION ACTIONS */}
+
+                {(donation.status ===
+                  "POSTED" ||
+                  donation.status ===
+                    "MATCHED") && (
+
+                  <div
+                    style={{
+                      display:
+                        "flex",
+                      gap: "12px",
+                      flexWrap:
+                        "wrap",
+                      marginTop:
+                        "18px",
+                    }}
+                  >
+
+                    <button
+                      className="primary-btn"
+                      onClick={() =>
+                        openEditDonation(
+                          donation
+                        )
+                      }
+                      style={{
+                        flex:
+                          "1 1 180px",
+                      }}
+                    >
+                      ✏️ EDIT DONATION
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        cancelDonation(
+                          donation
+                        )
+                      }
+                      style={{
+                        flex:
+                          "1 1 180px",
+                        padding:
+                          "13px 18px",
+                        border:
+                          "1px solid #dc6b6b",
+                        background:
+                          "#fff",
+                        color:
+                          "#b23a3a",
+                        borderRadius:
+                          "10px",
+                        fontWeight:
+                          "700",
+                        cursor:
+                          "pointer",
+                      }}
+                    >
+                      ❌ CANCEL DONATION
+                    </button>
+
+                  </div>
+
+                )}
 
                 {/* ASSIGN DRIVER */}
 
@@ -1396,6 +1909,10 @@ function App() {
                     onClick={
                       assignDriver
                     }
+                    style={{
+                      marginTop:
+                        "12px",
+                    }}
                   >
                     🚗 ASSIGN DRIVER
                   </button>
@@ -1465,6 +1982,475 @@ function App() {
         )}
 
         {/* ===================================================
+            DONATION HISTORY
+        =================================================== */}
+
+        {activeTab ===
+          "History" && (
+
+          <section className="content-card">
+
+            <div className="page-title">
+
+              <div>
+
+                <h2>
+                  📋 Donation History
+                </h2>
+
+                <p>
+                  Review previous and
+                  active food rescue
+                  activities.
+                </p>
+
+              </div>
+
+              <button
+                className="primary-btn"
+                onClick={
+                  fetchDonations
+                }
+                style={{
+                  width:
+                    "auto",
+                  padding:
+                    "10px 18px",
+                }}
+              >
+                ↻ Refresh
+              </button>
+
+            </div>
+
+            {/* FILTERS */}
+
+            <div
+              style={{
+                display:
+                  "flex",
+                gap: "8px",
+                flexWrap:
+                  "wrap",
+                margin:
+                  "20px 0",
+              }}
+            >
+
+              {[
+                "ALL",
+                "ACTIVE",
+                "DELIVERED",
+                "CANCELLED",
+              ].map(
+                (filter) => (
+
+                  <button
+                    key={filter}
+                    onClick={() =>
+                      setHistoryFilter(
+                        filter
+                      )
+                    }
+                    style={{
+                      padding:
+                        "9px 15px",
+                      borderRadius:
+                        "8px",
+                      border:
+                        "1px solid #d9ded9",
+                      background:
+                        historyFilter ===
+                        filter
+                          ? "#244d3b"
+                          : "#fff",
+                      color:
+                        historyFilter ===
+                        filter
+                          ? "#fff"
+                          : "#334",
+                      fontWeight:
+                        "700",
+                      cursor:
+                        "pointer",
+                    }}
+                  >
+                    {filter}
+                  </button>
+
+                )
+              )}
+
+            </div>
+
+            {filteredDonations.length ===
+            0 ? (
+
+              <div className="empty-state">
+
+                <div>
+                  📋
+                </div>
+
+                <h3>
+                  No donations found
+                </h3>
+
+                <p>
+                  Your donation history
+                  will appear here.
+                </p>
+
+                <button
+                  className="primary-btn small-btn"
+                  onClick={() =>
+                    setActiveTab(
+                      "Donations"
+                    )
+                  }
+                >
+                  Create Donation
+                </button>
+
+              </div>
+
+            ) : (
+
+              <div
+                style={{
+                  display:
+                    "flex",
+                  flexDirection:
+                    "column",
+                  gap:
+                    "12px",
+                }}
+              >
+
+                {filteredDonations.map(
+                  (item) => (
+
+                    <div
+                      key={item.id}
+                      style={{
+                        border:
+                          "1px solid #e3e7e3",
+                        borderRadius:
+                          "14px",
+                        padding:
+                          "18px",
+                        background:
+                          "#fff",
+                      }}
+                    >
+
+                      <div
+                        style={{
+                          display:
+                            "flex",
+                          justifyContent:
+                            "space-between",
+                          alignItems:
+                            "flex-start",
+                          gap:
+                            "15px",
+                          flexWrap:
+                            "wrap",
+                        }}
+                      >
+
+                        <div>
+
+                          <h3
+                            style={{
+                              margin:
+                                "0 0 6px",
+                              color:
+                                "#20362c",
+                            }}
+                          >
+                            🍱{" "}
+                            {item.foodType}
+                          </h3>
+
+                          <p
+                            style={{
+                              margin:
+                                "0",
+                              color:
+                                "#68736d",
+                            }}
+                          >
+                            {item.quantity} kg
+                            {" • "}
+                            📍{" "}
+                            {item.location}
+                          </p>
+
+                        </div>
+
+                        <span
+                          className={
+                            getStatusClass(
+                              item.status
+                            )
+                          }
+                          style={{
+                            padding:
+                              "7px 11px",
+                            borderRadius:
+                              "20px",
+                            fontSize:
+                              "12px",
+                            fontWeight:
+                              "800",
+                          }}
+                        >
+                          {item.status}
+                        </span>
+
+                      </div>
+
+                      <div
+                        style={{
+                          display:
+                            "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit,minmax(170px,1fr))",
+                          gap:
+                            "12px",
+                          marginTop:
+                            "16px",
+                          paddingTop:
+                            "15px",
+                          borderTop:
+                            "1px solid #edf0ed",
+                        }}
+                      >
+
+                        <div>
+                          <small>
+                            RECIPIENT
+                          </small>
+
+                          <strong
+                            style={{
+                              display:
+                                "block",
+                              marginTop:
+                                "4px",
+                            }}
+                          >
+                            {item
+                              .matchedNGO
+                              ?.name ||
+                              "Not matched"}
+                          </strong>
+                        </div>
+
+                        <div>
+                          <small>
+                            DRIVER
+                          </small>
+
+                          <strong
+                            style={{
+                              display:
+                                "block",
+                              marginTop:
+                                "4px",
+                            }}
+                          >
+                            {item.driver
+                              ?.name ||
+                              "Not assigned"}
+                          </strong>
+                        </div>
+
+                        <div>
+                          <small>
+                            VEHICLE
+                          </small>
+
+                          <strong
+                            style={{
+                              display:
+                                "block",
+                              marginTop:
+                                "4px",
+                            }}
+                          >
+                            {item.driver
+                              ?.vehicleType
+                              ? `${item.driver.vehicleType} • ${item.driver.vehicleNumber}`
+                              : "—"}
+                          </strong>
+                        </div>
+
+                        <div>
+                          <small>
+                            CREATED
+                          </small>
+
+                          <strong
+                            style={{
+                              display:
+                                "block",
+                              marginTop:
+                                "4px",
+                            }}
+                          >
+                            {formatDate(
+                              item.createdAt
+                            )}
+                          </strong>
+                        </div>
+
+                      </div>
+
+                      {/* HISTORY ACTIONS */}
+
+                      <div
+                        style={{
+                          display:
+                            "flex",
+                          gap:
+                            "9px",
+                          flexWrap:
+                            "wrap",
+                          marginTop:
+                            "15px",
+                        }}
+                      >
+
+                        <button
+                          onClick={() => {
+                            setDonation(
+                              item
+                            );
+
+                            if (
+                              item.driver
+                            ) {
+                              setDriverLocation(
+                                {
+                                  currentArea:
+                                    item
+                                      .driver
+                                      .currentArea,
+                                  headingTo:
+                                    item
+                                      .driver
+                                      .headingTo,
+                                  eta:
+                                    item
+                                      .driver
+                                      .eta,
+                                  distance:
+                                    item
+                                      .driver
+                                      .distance,
+                                }
+                              );
+                            }
+
+                            setActiveTab(
+                              "Donations"
+                            );
+                          }}
+                          style={{
+                            padding:
+                              "9px 13px",
+                            border:
+                              "1px solid #d7ded9",
+                            borderRadius:
+                              "8px",
+                            background:
+                              "#fff",
+                            cursor:
+                              "pointer",
+                            fontWeight:
+                              "700",
+                          }}
+                        >
+                          View Details
+                        </button>
+
+                        {(item.status ===
+                          "POSTED" ||
+                          item.status ===
+                            "MATCHED") && (
+
+                          <>
+                            <button
+                              onClick={() =>
+                                openEditDonation(
+                                  item
+                                )
+                              }
+                              style={{
+                                padding:
+                                  "9px 13px",
+                                border:
+                                  "1px solid #cbd8d0",
+                                borderRadius:
+                                  "8px",
+                                background:
+                                  "#f6faf7",
+                                cursor:
+                                  "pointer",
+                                fontWeight:
+                                  "700",
+                              }}
+                            >
+                              ✏️ Edit
+                            </button>
+
+                            <button
+                              onClick={() =>
+                                cancelDonation(
+                                  item
+                                )
+                              }
+                              style={{
+                                padding:
+                                  "9px 13px",
+                                border:
+                                  "1px solid #e2aaaa",
+                                borderRadius:
+                                  "8px",
+                                background:
+                                  "#fff8f8",
+                                color:
+                                  "#a33",
+                                cursor:
+                                  "pointer",
+                                fontWeight:
+                                  "700",
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </>
+
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  )
+                )}
+
+              </div>
+
+            )}
+
+          </section>
+
+        )}
+
+        {/* ===================================================
             DRIVER TRACKING
         =================================================== */}
 
@@ -1499,7 +2485,9 @@ function App() {
             </div>
 
             {donation &&
-            donation.driver ? (
+            donation.driver &&
+            donation.status !==
+              "CANCELLED" ? (
 
               <div className="tracking-layout">
 
@@ -1572,16 +2560,42 @@ function App() {
 
                   </div>
 
+                  <div className="live-map-card">
+                    <div className="live-map-header">
+                      <div><span>LIVE ROUTE</span><strong>Simulated driver location</strong></div>
+                      <div className="map-live-pill"><span /> LIVE</div>
+                    </div>
+                    <div className="map-canvas">
+                      <div className="map-grid-lines" />
+                      <div className="map-road road-one" />
+                      <div className="map-road road-two" />
+                      <div className="map-road road-three" />
+                      <div className="map-road road-four" />
+                      <div className="map-route-shadow" />
+                      <div className="map-route-fill" style={{ width: `${getMapProgress()}%` }} />
+                      <div className="map-pin pickup-pin"><span>📦</span><small>Pickup</small></div>
+                      <div className="map-driver-marker" style={{ left: `${Math.min(92, Math.max(8, getMapProgress()))}%` }}><div className="driver-pulse" /><span>{getDriverIcon()}</span></div>
+                      <div className="map-pin ngo-pin"><span>🏠</span><small>NGO</small></div>
+                    </div>
+                    <div className="map-route-info">
+                      <div><small>FROM</small><strong>{donation.location || "Pickup Location"}</strong></div>
+                      <div className="map-arrow">→</div>
+                      <div><small>TO</small><strong>{donation.matchedNGO?.name || "Community NGO"}</strong></div>
+                    </div>
+                    <div className="map-disclaimer">📍 Simulated live tracking for MVP demonstration</div>
+                  </div>
+
                   <div className="route-progress-label">
 
                     {donation.status ===
                     "DRIVER ASSIGNED"
                       ? "Driver is waiting at pickup location"
                       : donation.status ===
-                          "DELIVERED" ||
-                        (driverLocation?.distance ??
-                          donation?.driver?.distance ??
-                          0) <= 0
+                            "DELIVERED" ||
+                          (driverLocation?.distance ??
+                            donation?.driver
+                              ?.distance ??
+                            0) <= 0
                       ? "Driver has reached the NGO"
                       : "Driver is moving towards the NGO"}
 
@@ -1709,7 +2723,7 @@ function App() {
                   </h3>
 
                   <p>
-                    Delivery Driver
+                    Delivery Partner
                   </p>
 
                   <div className="driver-status">
@@ -1724,6 +2738,18 @@ function App() {
                   <p>
                     📞{" "}
                     {donation.driver.phone}
+                  </p>
+
+                  <p>
+                    🚗{" "}
+                    {donation.driver.vehicleType ||
+                      "Delivery Vehicle"}
+                  </p>
+
+                  <p>
+                    🔢{" "}
+                    {donation.driver.vehicleNumber ||
+                      "Vehicle number unavailable"}
                   </p>
 
                   <p>
@@ -1752,6 +2778,67 @@ function App() {
                     </p>
 
                   )}
+
+                  {/* CONTACT BUTTONS */}
+
+                  <div
+                    style={{
+                      display:
+                        "flex",
+                      gap:
+                        "9px",
+                      marginTop:
+                        "16px",
+                    }}
+                  >
+
+                    <a
+                      href={`tel:${donation.driver.phone}`}
+                      style={{
+                        flex: 1,
+                        textAlign:
+                          "center",
+                        textDecoration:
+                          "none",
+                        padding:
+                          "11px 8px",
+                        borderRadius:
+                          "9px",
+                        background:
+                          "#244d3b",
+                        color:
+                          "#fff",
+                        fontWeight:
+                          "700",
+                      }}
+                    >
+                      📞 Call
+                    </a>
+
+                    <a
+                      href={`sms:${donation.driver.phone}`}
+                      style={{
+                        flex: 1,
+                        textAlign:
+                          "center",
+                        textDecoration:
+                          "none",
+                        padding:
+                          "11px 8px",
+                        borderRadius:
+                          "9px",
+                        background:
+                          "#eef5f0",
+                        color:
+                          "#244d3b",
+                        fontWeight:
+                          "700",
+                      }}
+                    >
+                      💬 Message
+                    </a>
+
+                  </div>
 
                 </div>
 
@@ -2138,6 +3225,258 @@ function App() {
         )}
 
       </main>
+
+      {/* =====================================================
+          EDIT DONATION MODAL
+      ===================================================== */}
+
+      {editingDonation && (
+
+        <div
+          style={{
+            position:
+              "fixed",
+            inset: 0,
+            background:
+              "rgba(15,25,20,0.55)",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            zIndex: 1000,
+            padding:
+              "20px",
+          }}
+        >
+
+          <div
+            style={{
+              width:
+                "min(560px, 100%)",
+              background:
+                "#fff",
+              borderRadius:
+                "18px",
+              padding:
+                "26px",
+              boxShadow:
+                "0 20px 60px rgba(0,0,0,0.2)",
+            }}
+          >
+
+            <div
+              style={{
+                display:
+                  "flex",
+                justifyContent:
+                  "space-between",
+                alignItems:
+                  "center",
+                marginBottom:
+                  "20px",
+              }}
+            >
+
+              <div>
+
+                <h2
+                  style={{
+                    margin:
+                      "0 0 5px",
+                    color:
+                      "#20362c",
+                  }}
+                >
+                  ✏️ Edit Donation
+                </h2>
+
+                <p
+                  style={{
+                    margin:
+                      "0",
+                    color:
+                      "#6d7771",
+                  }}
+                >
+                  Update your donation
+                  details.
+                </p>
+
+              </div>
+
+              <button
+                onClick={
+                  closeEditDonation
+                }
+                style={{
+                  border:
+                    "none",
+                  background:
+                    "#f1f4f1",
+                  borderRadius:
+                    "50%",
+                  width:
+                    "36px",
+                  height:
+                    "36px",
+                  cursor:
+                    "pointer",
+                  fontSize:
+                    "18px",
+                }}
+              >
+                ×
+              </button>
+
+            </div>
+
+            <div
+              style={{
+                display:
+                  "flex",
+                flexDirection:
+                  "column",
+                gap:
+                  "15px",
+              }}
+            >
+
+              <div className="field">
+
+                <label>
+                  Food Type
+                </label>
+
+                <input
+                  value={
+                    editFoodType
+                  }
+                  onChange={(e) =>
+                    setEditFoodType(
+                      e.target.value
+                    )
+                  }
+                />
+
+              </div>
+
+              <div className="field">
+
+                <label>
+                  Quantity (kg)
+                </label>
+
+                <input
+                  type="number"
+                  min="1"
+                  value={
+                    editQuantity
+                  }
+                  onChange={(e) =>
+                    setEditQuantity(
+                      e.target.value
+                    )
+                  }
+                />
+
+              </div>
+
+              <div className="field">
+
+                <label>
+                  Pickup Location
+                </label>
+
+                <input
+                  value={
+                    editLocation
+                  }
+                  onChange={(e) =>
+                    setEditLocation(
+                      e.target.value
+                    )
+                  }
+                />
+
+              </div>
+
+              <div className="field">
+
+                <label>
+                  Safe Until
+                </label>
+
+                <input
+                  type="time"
+                  value={
+                    editExpiryTime
+                  }
+                  onChange={(e) =>
+                    setEditExpiryTime(
+                      e.target.value
+                    )
+                  }
+                />
+
+              </div>
+
+            </div>
+
+            <div
+              style={{
+                display:
+                  "flex",
+                gap:
+                  "10px",
+                marginTop:
+                  "22px",
+              }}
+            >
+
+              <button
+                onClick={
+                  closeEditDonation
+                }
+                style={{
+                  flex: 1,
+                  padding:
+                    "12px",
+                  border:
+                    "1px solid #d5ddd7",
+                  borderRadius:
+                    "10px",
+                  background:
+                    "#fff",
+                  cursor:
+                    "pointer",
+                  fontWeight:
+                    "700",
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="primary-btn"
+                onClick={
+                  saveEditedDonation
+                }
+                style={{
+                  flex: 1,
+                }}
+              >
+                Save Changes
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
 
     </div>
   );
