@@ -1,16 +1,99 @@
-# React + Vite
+# 🍲 Surplus-to-Shelter
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+### Real-Time Food Rescue & Donation Coordination Platform
 
-Currently, two official plugins are available:
+Surplus-to-Shelter is a web-based food rescue platform designed to connect food donors such as restaurants, caterers, grocery stores and campus dining facilities with nearby shelters and community organizations.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The platform helps coordinate surplus food donations, match them with suitable recipients, assign delivery drivers and track the donation journey from posting to delivery.
 
-## React Compiler
+Built for **AmiHacks 1.0 – Amity University Jaipur**.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## 🚨 Problem
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Every day, restaurants, caterers, grocery stores and institutional kitchens may have edible surplus food that cannot be sold or served again.
+
+The major challenge is not always the availability of food, but the lack of a fast coordination system between:
+
+- Food donors
+- NGOs / shelters
+- Volunteers / delivery drivers
+
+Since surplus food may remain usable only for a limited period, delays can result in edible food being wasted.
+
+---
+
+## 💡 Our Solution
+
+Surplus-to-Shelter provides a single platform where a donor can:
+
+1. Post available surplus food
+2. Enter quantity, location and expiry information
+3. Find a suitable nearby shelter
+4. Assign an available delivery driver
+5. Track the pickup and delivery process
+6. Monitor the overall impact of rescued food
+
+The system is designed around a simple workflow:
+
+**DONOR → MATCHING → DRIVER → PICKUP → DELIVERY → IMPACT**
+
+---
+
+# ✨ Key Features
+
+## 🥘 1. Surplus Food Donation
+
+Donors can quickly submit:
+
+- Food type
+- Quantity
+- Pickup location
+- Expiry / usable time
+
+The donation is then added to the active donation list.
+
+---
+
+## 🏠 2. Smart Recipient Matching
+
+The backend matches a donation with a suitable NGO/shelter based on:
+
+- Donation location
+- Recipient area
+- Recipient capacity
+- Current need level
+
+The current MVP uses area-based matching with capacity and need as supporting factors.
+
+### Example:
+
+```text
+Bani Park
+     ↓
+Seva Kitchen Jaipur
+
+C-Scheme
+     ↓
+Annapurna Shelter
+
+Vaishali Nagar
+     ↓
+Feeding Hands Jaipur
+
+Malviya Nagar
+     ↓
+Community Food Shelter
+
+Jagatpura
+     ↓
+Hope Community Centre
+
+Mansarovar
+     ↓
+Roti Bank Jaipur
+
+Sodala
+     ↓
+Sahara Community Shelter
